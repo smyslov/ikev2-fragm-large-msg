@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<rfc category="std" ipr="trust200902" docName="draft-smyslov-ipsecme-ikev2-fragm-large-msg-01">
+
+<?xml-stylesheet type='text/xsl' href='rfc2629.xslt' ?>
+
+<?rfc toc="yes" ?>
+<?rfc symrefs="yes" ?>
+<?rfc sortrefs="no"?>
+<?rfc iprnotified="no" ?>
+<?rfc strict="yes" ?>
+
+    <front>
+        <title abbrev="IKE Fragmentation for Large Messages">Using IKE Fragmentation for Large Messages</title>
+        <author initials='V.' surname="Smyslov" fullname='Valery Smyslov'>
+            <organization>ELVIS-PLUS</organization>
+            <address>
+                <postal>
+                    <country>RU</country>
+                </postal>
+                <phone></phone>
+                <email>svan@elvis.ru</email>
+            </address>
+        </author>
+        <date/>
+
+        <abstract>
+            <t> This document describes describes issues with using Internet Key Exchange version 2 (IKEv2) fragmentation
+            for transmitting large messages on unreliable transport. The document proposes several approaches
+            for dealing with these issues: randomizing the order the fragments are sent, dispersing sending 
+            fragments over time and selective retransmission of fragments based on information from the peer about their receipt.
+            </t>
+        </abstract>
+    </front>
+
+    <middle>
+        <section anchor="intro" title="Introduction">
+            <t> The Internet Key Exchange version 2 (IKEv2) protocol <xref target="RFC7296" /> is used for 
+            key management in IPsec architecture. IKEv2 was originally defined on UDP transport, and, while
+            later IKEv2 extensions added TCP as a possible transport (<xref target="RFC9329" />, <xref target="I-D.ietf-ipsecme-ikev2-reliable-transport" />), 
+            UDP is still a preferred and mostly used transport for IKEv2.
+            </t>
+
+            <t> When UDP is used as a transport, any IKEv2 message that exceeds MTU size is fragmented at IP layer.
+            IP fragmentation is known to cause problems with some intermediate devices that cannot correctly
+            procesess any IP fragments other than the first one. To deal with this, a protocol extension 
+            was developed that allows fragmenting messages at IKE layer <xref target="RFC7383" />.
+            While IKEv2 fragmentation allows to avoid IP fragmentation of large messages, it lacks
+            any congestion control mechanisms, that may cause issues when the fragmented message
+            is large (with some definition of "large") and the network (or receiver's) capacity 
+            is limited (with some definition of "limited"). This document defines several approaches
+            that can be used to mitigate these issues.
+            </t>
+        </section>
+
+        <section anchor="mustshouldmay" title="Terminology and Notation">
+            <t> The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", 
+            "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted 
+            as described in BCP 14 <xref target="RFC2119" /> <xref target="RFC8174" /> when, and only when, 
+            they appear in all capitals, as shown here.
+            </t>
+
+            <t> All multi-octet fields representing integers in this document are laid out in big
+            endian order (also known as "most significant byte first", or "network byte order").
+            </t>
+        </section>
+
+        <section anchor="issues" title="Issues with Using IKE Fragmentation for Large Messages">
+            <t> At the time the IKE fragmentation mechanism was being developed, it was considered 
+            that most IKEv2 messages would fit into the typical MTU size and only few of them could 
+            exceed it. In particular, the IKE_AUTH messages containing certificates were concerned and
+            it was assumed at that time that "large" IKEv2 messages would be less than few Kbytes in size,
+            so that the number of IKE fragments for a message (with a typical MTU size) would be small.
+            Due to these considerations it was decided that no mechanism for acknowledging of receipt
+            of individual fragments is needed - all fragments of a message are transmitted (and retransmitted) at once, 
+            as with IP fragmentation.
+            </t>
+
+            <t> When postquantum cryptographic mechanisms started to be incorporated into IKEv2, the notion of "large"
+            for an IKEv2 message has changed from few Kbytes to several tens of Kbytes <xref target="I-D.wang-ipsecme-hybrid-kem-ikev2-frodo" /> and 
+            up to several hundreds of Kbytes <xref target="I-D.smyslov-ipsecme-ikev2-mceliece" />.
+            When messages of this size are fragmented and all fragments are sent at once, it can happen that 
+            either intermediate network devices or the final recipient are uncapable of handling that much data 
+            at the rate it was sent, causing some fragments to be lost. Sender will eventually retransmit 
+            all the message fragments, but since the disproportion between sending rate and network/recipient
+            limitations remain, it is likely that some fragments will be lost again. Since the restransmissions
+            are not adaptive, there is no guarantee that the message will eventually be drlivered even after several retransmissions.
+            </t>
+        </section>
+
+        <section anchor="techniques" title="Proposed Techniques">
+            <t> This document defines several techniques that can be used to improve reliability
+            of transmitting large messages using IKEv2 fragmentation mechanism.
+            These techniques can be used independently of each other.
+            The techniques can be classified as unilateral actionsm, which do not require any actiona from the peer, and
+            bilateral actions that require mutual support by both sender and receiver.
+            </t>
+
+            <section anchor="unilateral" title="Unilateral Techniques">
+                <section anchor="order" title="Sending Fragments in different Order">
+                    <t> The simplest technique is to change the order in which fragments are sent with each retransmission.
+                    This will help in situation the recipient have limited buffer size for incoming packets 
+                    and cannot process the received fragments quickly enough to free the buffer.
+                    This means that the some number of the first sent fragments will be processed while the rest will be dropped.
+                    Changing the order in which the fragments are sent with each retransmission ensures that 
+                    the first sent packets will change each time, thus increasing the chances all fragments are delivered.
+                    </t>
+                </section>
+
+                <section anchor="rate" title="Reducing Sending Rate">
+                    <t> Another simple technique is to add some delay between sending each fragment, thus reducing
+                    the rate with which data is being transmitted. Since the sender does not know what rate
+                    is OK for the receiver, this document gives no advice what this delay should be.
+                    If the sender uses exponential back-off when retransmitting, a sensible approach would be 
+                    to also increase delay between sending fragments with each retransmission.
+                    </t>
+                </section>
+
+                <section anchor="init-resend" title="Reducing the Amount of Data Sent by Initiator">
+                    <t> In IKEv2 it is always the initiator that plays an active role in ensuring that both the request and the response
+                    messages of an exchange are delivered (Section 2.1 of <xref target="RFC7296" />). In particular, the initiator
+                    periodically retransmits the request until it receives the response. With IKE fragmentation in case the response
+                    message is fragmented, a situation is possible that the initiator receives only some of these fragments.
+                    In this situation the initiator must retransmit the request, but if the request message has been fragmented too (the usual case),
+                    there is no need to retransmit all fragments of the request message, it is enough to retransmit only 
+                    the first one (i.e., with the Fragment Number field equal to 1). This works because only this fragment
+                    triggers re-sending the response (as specified in Section 2.6.1 of <xref target="RFC7383" />, all other fragments
+                    are discarded and would only waste network resources.
+                    </t>
+                </section>
+            </section>
+
+            <section anchor="bilateral" title="Bilateral Techniques">
+                <section anchor="acks" title="Selective Retransmission of Fragments">
+                    <t> Selective Retransmission of Fragments is a protocol extension that allows, when supported by both peers,
+                    to selectively retransmit only those fragments that weren't delivered.
+                    </t>
+
+                    <section anchor="negotiation" title="Negotiation">
+                        <t> No negotiation is required to use this extension. See <xref target="rationale" />.
+                        </t>
+                    </section>
+
+                    <section anchor="request" title="Handling Fragmented Request">
+                        <t> Initially the initiator sends all fragments as defined in <xref target="RFC7383" />. If the responder
+                        supports this extension and it received only some of the sent fragments, then the responder
+                        can indicate which fragments are missing. For this purpose, it sends an IKEv2 response 
+                        message formatted in accordance with <xref target="receipt-status-msg" />.
+                        </t>
+                    </section>
+
+                    <section anchor="response" title="Handling Fragmented Response">
+                        <t> The initiator keeps retransmitting the request message (fragmented or not, with selective fragment retransmission or not) until
+                        it receives at least one response fragment message. When this happens and if there are some missing response message fragments,
+                        the initiator supporting this extension can indicate which fragments are missing. For this purpose, it sends an IKEv2 request 
+                        message for the same exchange (with the same Message ID) formatted in accordance with <xref target="receipt-status-msg" />.
+                        </t>
+                    </section>
+
+                    <section anchor="receipt-status-msg" title="Receipt Status Message">
+                        <t> Receipt Status Message is an IKEv2 message that contains only the Encrypted Fragment payload
+                        (see Section 2.5 of <xref target="RFC7383" />) formatted as follows:
+                        <ul>
+                            <li> The Next Payload field is set to 0.
+                            </li>
+                            <li> The Fragment Number field is set to 0xffff.
+                            </li>
+                            <li> The Total Fragments field is set to 0xffff.
+                            </li>
+                            <li> The Encrypted content field contains the information about the missing fragments represented
+                            in the form defined in <xref target="receipt-status-data" />.
+                            </li>
+                        </ul>
+                        All other fields are filled in accordance with <xref target="RFC7383" /> and <xref target="RFC7296" />.
+                        However, when the Integrity Checksum Data is calculated (perhaps as part of AEAD encryption), 
+                        the Fragment Number field is temporary set to zero. Once the ICV calculation is done, 
+                        this field is restored to 0xffff and the message is sent.
+                        </t>
+
+                        <t> The formatting of this message indicates that it is the last fragment of the message
+                        fragmented to 65535 parts. If the receiver of this message does not support this extension, 
+                        it will interpret this message as above, but the message will have no effect since its ICV check will fail.
+                        </t>
+
+                        <t> If the receiver supports this extension, it will recognize that this message contains the receipt status data,
+                        since it is unlikely that any real IKEv2 message sent over UDP is fragmented to 65535 fragments.
+                        In this case the receiver will check the ICV making sure that the Fragment Number field is set to zero before this.
+                        If the the ICV check passes and the message is successfully decrypted, then the receiver extracts 
+                        the receipt status data and obtains the information about the fragments that need to be retransmitted.
+                        </t>
+
+                        <t> If this ICV check fails, then the receiver <bcp14>MAY</bcp14> re-run the ICV check after restoring 
+                        the Fragment Number field to its original value 0xffff. This is to handle the extremely rare case when the sender of this message 
+                        does not support this extension and indeed fragmented the IKEv2 message into 65535 fragments,
+                        and it happened that the last fragment come first.
+                        </t>
+
+                        <aside>
+                            <t> I admit that the trick with invalid ICV is a protocol hack. Mea culpa. See <xref target="rationale" />.
+                            </t>
+                        </aside>
+
+                        <t> The content of the Encrypted Fragment payload contains the receipt status data in the following format.
+                        </t>
+
+                        <figure anchor="receipt-status-data" title="Receipt Status Data Format">
+                            <artwork align="center" name=""><![CDATA[
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|   Rcpt Status Packet Number   |       Total Fragments         |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|      First Fragment Num       |      Last Fragment Num        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+~                     Receipt Status Bitmap                     ~
+|               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|               |                                                 
++-+-+-+-+-+-+-+-+
+                            ]]></artwork>
+                        </figure>
+
+                        <ul>
+                            <li>Rcpt Status Packet Number (2 octets, unsigned integer) -- the number of this receipt status packet. Each new receipt status packet
+                            <bcp14>MUST</bcp14> have this value greater than previous receipt status packets sent by the host in the context of the current
+                            IKEv2 message exchange, i.e. with the same IKE SPIs, Exchange Type and Message ID. This field <bcp14> MUST NOT</bcp14> be zero,
+                            packets with zero value <bcp14>MUST</bcp14> be ignored on receipt.
+                            </li>
+                            <li>Total Fragments (2 octets, unsigned integer) -- when sending, this field <bcp14>MUST</bcp14> be set to the value from the 
+                            Total Fragments field in the Encrypted Fragment payloads (see Section 2.5 in <xref target="RFC7383" /> that the sender of this packet 
+                            currently uses to reconstruct the fragmented message. On receipr, if the value in this field 
+                            is not equal to the value in the Total Fragments field in the in the Encrypted Fragment payload most recently sent 
+                            to the peer, then this receipt status packet <bcp14>MUST</bcp14> be silently ignored.
+                            </li>
+                            <li>First Fragment Num (2 octets, unsigned integer) -- the number of the fragment that corresponds to the first significant 
+                            bit (the leftmost bit of the first octet) in the Receipt Status Bitmap. This field <bcp14>MUST NOT</bcp14> be zero and
+                            <bcp14>MUST NOT</bcp14> be greater than the value in the Total Fragments field. If these conditions are not met in the received packet, 
+                            the packet <bcp14>MUST</bcp14> be silently discarded.
+                            </li>
+                            <li>Last Fragment Num (2 octets, unsigned integer) -- the number of the fragment that corresponds to the last significant bit
+                            in the Receipt Status Bitmap.This field <bcp14>MUST NOT</bcp14> be zero, <bcp14>MUST NOT</bcp14> be smaller than the value
+                            in the First Fragment Num field and <bcp14>MUST NOT</bcp14> be greater than the value in the Total Fragments field. 
+                            If these conditions are not met in the received packet, the packet <bcp14>MUST</bcp14> be silently discarded.
+                            </li>
+                            <li>Receipt Status Bitmap (variable) -- this field contains a bitmap that represents receipt status for fragments with numbers 
+                            starting from the value in the from First Fragment Num field till the value from the Last Fragment Num field. The bitmap is 
+                            interpreted as starting from the most significant (the leftmost) bit of the first octet of the field. The length of the bitmap
+                            in octets is calculated as: ((Last Fragment Num) - (First Fragment Num) / 8) + 1. The last octet of the bitmap may contain some 
+                            unused bits, these bits are ignored. Each bit in the bitmap represents the receipt status of the corresponding fragment - 
+                            it is set to 1 if the fragment was received and successfully processed and set to 0 if the fragment is missing.
+                            </li>
+                        </ul>
+
+                    </section>
+
+                    <section anchor="when" title="Implementation Details">
+                        <t>TBD. Should discuss when to send messages with receipt status data, how to handle them, how to keep
+                        these messages small when the number of fragments is large, how to cope with PMTU discovery, etc.
+                        </t>
+                    </section>
+                </section>
+            </section>
+        </section>
+
+        <section anchor="security" title="Security Considerations">
+            <t> Security of IKEv2 and the IKEv2 fragmentation extension is discussed in <xref target="RFC7296" /> and <xref target="RFC7383" /> respectfully.
+            Techniques proposed in this document do not affect security properties of the protocol.
+            </t>
+        </section>
+
+        <section anchor="iana" title="IANA Considerations">
+            <t> This document makes no requests to IANA.
+            </t>
+        </section>
+    </middle>
+
+    <back>
+        <references title='Normative References'>
+            <?rfc include="https://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.2119.xml" ?>
+            <?rfc include="https://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.8174.xml" ?>
+            <?rfc include="https://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.7296.xml" ?>
+            <?rfc include="https://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.7383.xml" ?>
+        </references>
+
+        <references title='Informative References'>
+            <?rfc include="https://xml2rfc.ietf.org/public/rfc/bibxml/reference.RFC.9329.xml" ?>
+            <?rfc include="https://xml2rfc.tools.ietf.org/public/rfc/bibxml3/reference.I-D.ietf-ipsecme-ikev2-reliable-transport.xml"?>
+            <?rfc include="https://xml2rfc.tools.ietf.org/public/rfc/bibxml3/reference.I-D.wang-ipsecme-hybrid-kem-ikev2-frodo.xml"?>
+            <?rfc include="https://xml2rfc.tools.ietf.org/public/rfc/bibxml3/reference.I-D.smyslov-ipsecme-ikev2-mceliece.xml"?>
+            <?rfc include="https://xml2rfc.tools.ietf.org/public/rfc/bibxml3/reference.I-D.antony-ipsecme-ikev2-fragment-acknowledgment.xml"?>
+        </references>
+
+        <section anchor="rationale" title="Design Rationale for Selective Retransmission of Fragments Extension">
+            <t> The extension is not negotiated for the following reasons. First, there are currently many IKEv2 extensions,
+            most of them are negotiated via exchange of some notifications. The number of extensions grows, thus the 
+            number of notifications exchanged in initial IKE exchange grows as well. This increases the size of the IKE_SA_INIT
+            messages (not much, but still). Second, this extension is tightly tied to the IKEv2 fragmentation extension, thus, if it were 
+            negotiatable, peers should make sure that it is not negotiated alone, without IKEv2 fragmentation been negotiated too. 
+            Not a big deal, but still some additional checks. This could be avoided if RFC 7383 explicitly allowed notification data
+            to be non-empty for future extensions (e.g., as in <xref target="I-D.ietf-ipsecme-ikev2-reliable-transport" />),
+            but that was not the case. On the other hand, it appeared that this extension can be defined in such a way,
+            that no negotiation is needed by only relying on incoming fragment message checks defined in <xref target="RFC7383" />.
+            </t>
+
+            <t> It is possible to avoid the hack with intentionally invalid ICV if this extension defined that the Fragment Number 
+            field is set to zero (as it is currently defined for the purpose of ICV check). 
+            This would make the message invalid as per checks from Section 2.6 of <xref target="RFC7383" />, so the message would be dropped
+            by unsupporting initiator. The only concern here is that some network intermediate devices could do a DPI of IKEv2 traffic and drop invalid messages,
+            thus the message containing receipt status data is made looking valid on the wire and a hack with invalid ICV is used to force old implementations to discard it.
+            But this is purely theoretical concert not backed up by any real data.
+            </t>
+        </section>
+
+        <section numbered="false" title="Acknowledgements">
+            <t> Author is grateful to Antony Antony, Steffen Klassert and Tobias Brunner, whose document "IKEv2 Fragment Acknowledgment Extension"
+             <xref target="I-D.antony-ipsecme-ikev2-fragment-acknowledgment" /> resurrected the ideas that were in the author's mind
+             at the time RFC 7383 was being developed, but were abandoned at that time due to unnecessary (as was believed then) complexity.
+            </t>
+        </section>
+
+    </back>
+</rfc>
+
+
