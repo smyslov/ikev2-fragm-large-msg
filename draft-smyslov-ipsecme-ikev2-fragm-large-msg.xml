@@ -152,22 +152,22 @@
 
                     <section anchor="negotiation" title="Negotiation">
                         <t> <!-- No negotiation is required to use this extension. See <xref target="rationale" />. -->
-                        This extension is negotiated by exchanging a new notification SELECTIVE_FRAGMENT_RESEND_SUPPORTED in the IKE_SA_INIT exchange.
+                        This extension is negotiated by exchanging a new notification FRAGMENT_ACK_SUPPORTED in the IKE_SA_INIT exchange.
                         The Notify Message Type for this notification is &lt;TBA by IANA&gt;, Protocol ID and SPI Size are both set to 0 
                         and the notification data is empty. Future specifications may make use of the notification data of this notification.
 			            Implementations compliant with this document <bcp14>MUST</bcp14> ignore the content
-			            of the notification data in the received SELECTIVE_FRAGMENT_RESEND_SUPPORTED notification if it is not empty.
+			            of the notification data in the received FRAGMENT_ACK_SUPPORTED notification if it is not empty.
                         </t>
 
                         <t> The negotiation only takes effect if peers also negotiate the use of IKE fragmentation, as defined
-                        in Section 2.3 of <xref target="RFC7383" />. If IKE fragmentation is not negotiated, the SELECTIVE_FRAGMENT_RESEND_SUPPORTED notifications
+                        in Section 2.3 of <xref target="RFC7383" />. If IKE fragmentation is not negotiated, the FRAGMENT_ACK_SUPPORTED notifications
                         <bcp14>MUST</bcp14> be ignored.
                         </t>
 
                         <t> If the selective retransmission of fragments is negotiated, the maximum number of fragments that an IKEv2 sender 
                         can fragment an IKE message to, is limited to 65534, because the value 65535 (0xffff) 
                         in the Total Fragments field of the Encrypted Fragment Payload (Section 2.5 of <xref target="RFC7383" />) is used
-                        as an indication that this is not a fragment, but instead a Receipt Status message (<xref target="receipt-status-msg" />).
+                        as an indication that this is not a fragment, but instead a Fragment Acknowledgment message (<xref target="receipt-status-msg" />).
                         </t>
 
                         <aside>
@@ -189,7 +189,7 @@
                     <section anchor="response" title="Handling Fragmented Response">
                         <t> The initiator keeps retransmitting the request message until it receives at least one response message fragment.
                         If this extension is negotiated and the request message was sent fragmented and the responder has indicated that it has received 
-                        all its fragments in the latest Receipt Status Message, but no response message for the exchange is still received by the initiator, 
+                        all its fragments in the latest Fragment Acknowledgment message, but no response message for the exchange is still received by the initiator, 
                         the initiator <bcp14>MUST</bcp14> continue retransmitting the very first fragment of the request until it receives at least one 
                         response message fragment.
                         </t>
@@ -200,8 +200,8 @@
                         </t>
                     </section>
 
-                    <section anchor="receipt-status-msg" title="Receipt Status Message">
-                        <t> Receipt Status Message is an IKEv2 message that contains only the Encrypted Fragment payload
+                    <section anchor="receipt-status-msg" title="Fragment Acknowledgment Message">
+                        <t> Fragment Acknowledgment is an IKEv2 message that contains only the Encrypted Fragment payload
                         (see Section 2.5 of <xref target="RFC7383" />) formatted as follows:
                         <ul>
                             <li> The Next Payload field is set to 0.
@@ -217,16 +217,16 @@
                         All other fields are filled in accordance with <xref target="RFC7383" /> and <xref target="RFC7296" />.
                         </t>
 
-                        <t> If the peers negotiated this extension, the receiver will recognize that this message contains the receipt status data.
+                        <t> If the peers negotiated this extension, the receiver will recognize that this message contains the fragment acknowledgment data.
                         If the message is successfully decrypted and verified, then the receiver extracts 
-                        the receipt status data and obtains the information about the fragments that need to be retransmitted.
+                        the fragment acknowledgment data and obtains the information about the fragments that need to be retransmitted.
                         The receiver <bcp14>MUST</bcp14> ignore messages failed to pass the ICV verification.
                         </t>
 
-                        <t> The content of the Encrypted Fragment payload contains the receipt status data in the following format.
+                        <t> The content of the Encrypted Fragment payload contains the fragment acknowledgment data in the following format.
                         </t>
 
-                        <figure anchor="receipt-status-data" title="Receipt Status Data Format">
+                        <figure anchor="receipt-status-data" title="Fragment Acknowledgment Data Format">
                             <artwork align="center" name=""><![CDATA[
                      1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -235,7 +235,7 @@
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |      First Fragment Num       |      Last Fragment Num        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-~                     Receipt Status Bitmap                     ~
+~               Fragment Acknowledgment Bitmap                  ~
 |               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |               |                                                 
 +-+-+-+-+-+-+-+-+
@@ -243,8 +243,8 @@
                         </figure>
 
                         <ul>
-                            <li>Rcpt Status Packet Number (2 octets, unsigned integer) -- the ordinal number of this receipt status packet. Each new receipt status packet
-                            <bcp14>MUST</bcp14> have this value greater than previous receipt status packets sent by the host in the context of the current
+                            <li>Rcpt Status Packet Number (2 octets, unsigned integer) -- the ordinal number of this Fragment Acknowledgment message. Each new Fragment Acknowledgment
+                            message <bcp14>MUST</bcp14> have this value greater than previous Fragment Acknowledgment messages sent by the host in the context of the current
                             IKEv2 message exchange, i.e. with the same IKE SPIs, Exchange Type, Message ID and a sender's role (so that 
                             the initiator and the responder maintain these numbers for the messages they send independently). This field <bcp14> MUST NOT</bcp14> be zero, 
                             packets with zero value <bcp14>MUST</bcp14> be ignored on receipt.
@@ -254,22 +254,22 @@
                             Total Fragments field in the Encrypted Fragment payloads (see Section 2.5 in <xref target="RFC7383" /> that the sender of this packet 
                             currently uses to reconstruct the fragmented message. On receipr, if the value in this field 
                             is not equal to the value in the Total Fragments field in the in the Encrypted Fragment payload most recently sent 
-                            to the peer, then this receipt status packet <bcp14>MUST</bcp14> be silently ignored.
+                            to the peer, then this Fragment Acknowledgment message <bcp14>MUST</bcp14> be silently ignored.
                             </li>
 
                             <li>First Fragment Num (2 octets, unsigned integer) -- the number of the fragment that corresponds to the first significant 
-                            bit (the leftmost bit of the first octet) in the Receipt Status Bitmap. This field <bcp14>MUST NOT</bcp14> be zero and
+                            bit (the leftmost bit of the first octet) in the Fragment Acknowledgment Bitmap. This field <bcp14>MUST NOT</bcp14> be zero and
                             <bcp14>MUST NOT</bcp14> be greater than the value in the Total Fragments field. If these conditions are not met in the received packet, 
                             the packet <bcp14>MUST</bcp14> be silently discarded.
                             </li>
 
                             <li>Last Fragment Num (2 octets, unsigned integer) -- the number of the fragment that corresponds to the last significant bit
-                            in the Receipt Status Bitmap.This field <bcp14>MUST NOT</bcp14> be zero, <bcp14>MUST NOT</bcp14> be smaller than the value
+                            in the Fragment Acknowledgment Bitmap.This field <bcp14>MUST NOT</bcp14> be zero, <bcp14>MUST NOT</bcp14> be smaller than the value
                             in the First Fragment Num field and <bcp14>MUST NOT</bcp14> be greater than the value in the Total Fragments field. 
                             If these conditions are not met in the received packet, the packet <bcp14>MUST</bcp14> be silently discarded.
                             </li>
 
-                            <li>Receipt Status Bitmap (variable) -- this field contains a bitmap that represents receipt status for fragments with numbers 
+                            <li>Fragment Acknowledgment Bitmap (variable) -- this field contains a bitmap that represents receipt status for fragments with numbers 
                             starting from the value from the First Fragment Num field till the value from the Last Fragment Num field. The bitmap is 
                             interpreted as starting from the most significant (the leftmost) bit of the first octet of the field. The length of the bitmap
                             in octets is calculated as: (((Last Fragment Num) - (First Fragment Num)) / 8) + 1. The last octet of the bitmap may contain some 
@@ -281,7 +281,7 @@
                     </section>
 
                     <section anchor="when" title="Implementation Details">
-                        <t>TBD. Should discuss when to send messages with receipt status data, how to handle them, how to keep
+                        <t>TBD. Should discuss when to send messages with Fragment Acknowledgment data, how to handle them, how to keep
                         these messages small when the number of fragments is large, how to cope with PMTU discovery, etc.
                         </t>
                     </section>
@@ -300,7 +300,7 @@
 			the "Internet Key Exchange Version 2 (IKEv2) Parameters" registry group:</t>
             <figure align="center">
                 <artwork align="left"><![CDATA[
-TBA       SELECTIVE_FRAGMENT_RESEND_SUPPORTED
+TBA       FRAGMENT_ACK_SUPPORTED
                 ]]></artwork>
             </figure>
         </section>
